@@ -6,7 +6,7 @@ import numpy as np
 from matplotlib.figure import Figure
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 from skimage.filters import threshold_isodata
-
+from sklearn.cluster import KMeans
 import matplotlib.pyplot as plt
 
 class MedicalImageGUI:
@@ -20,6 +20,13 @@ class MedicalImageGUI:
         self.selected_dimension = None
         self.layer_scale = None
         self.segmented_image = None
+
+        # Annotation variables
+        self.annotation_active = False
+        self.circles = {}
+        self.active_circle = None
+        self.current_color = 'red'  # Default color
+        self.brush_size = 5  # Default brush size
 
         self.create_menu()
         self.create_widgets()
@@ -36,6 +43,8 @@ class MedicalImageGUI:
         segment_menu = tk.Menu(menubar, tearoff=0)
         segment_menu.add_command(label="Segmentar por Umbralización", command=self.thresholding)
         segment_menu.add_command(label="Segmentar por ISODATA", command=self.segmentation_isodata)
+        segment_menu.add_command(label="Segmentar por K-medias", command=self.segmentation_kmeans)
+        segment_menu.add_command(label="Segmentar por Crecimiento de Regiones", command=self.region_growing)  # Agregar opción de segmentación por crecimiento de regiones
         menubar.add_cascade(label="Segmentar", menu=segment_menu)
 
         self.master.config(menu=menubar)
@@ -55,6 +64,12 @@ class MedicalImageGUI:
 
         self.layer_scale = tk.Scale(self.master, orient=tk.HORIZONTAL, command=self.display_image)
         self.layer_scale.pack(side=tk.TOP, fill=tk.X)
+
+        # Add annotation button
+        self.annotation_button_text = tk.StringVar()
+        self.annotation_button_text.set("Activar Anotación")
+        self.annotation_button = tk.Button(self.master, textvariable=self.annotation_button_text, command=self.toggle_annotation)
+        self.annotation_button.pack(side=tk.TOP)
 
     def load_image(self):
         file_path = filedialog.askopenfilename(filetypes=[("NIfTI files", "*.nii")])
@@ -105,6 +120,61 @@ class MedicalImageGUI:
         self.canvas = FigureCanvasTkAgg(self.fig, master=self.master)
         self.canvas.draw()
         self.canvas.get_tk_widget().pack()
+
+    def toggle_annotation(self):
+        if not self.annotation_active:
+            self.activate_annotation()
+            self.annotation_button_text.set("Desactivar Anotación")
+        else:
+            self.deactivate_annotation()
+            self.annotation_button_text.set("Activar Anotación")
+
+    def activate_annotation(self):
+        if self.canvas:
+            # Connect annotation functions to canvas events
+            self.canvas.mpl_connect("button_press_event", self.on_click)
+            self.canvas.mpl_connect("motion_notify_event", self.on_drag)
+            self.canvas.mpl_connect("button_release_event", self.on_release)
+        self.annotation_active = True
+
+    def deactivate_annotation(self):
+        if self.canvas:
+            # Disconnect annotation functions from canvas events
+            self.canvas.mpl_disconnect("button_press_event")
+            self.canvas.mpl_disconnect("motion_notify_event")
+            self.canvas.mpl_disconnect("button_release_event")
+        self.annotation_active = False
+
+    def on_click(self, event):
+        if event.inaxes:
+            x = int(event.xdata)
+            y = int(event.ydata)
+            color = self.current_color
+            brush_size = self.brush_size
+
+            if color in self.circles:
+                if self.circles[color] in self.ax.patches:
+                    self.circles[color].remove()
+
+            circle = plt.Circle((x, y), brush_size, color=color, fill=True)
+            self.ax.add_patch(circle)
+            self.circles[color] = circle
+            self.active_circle = circle
+            self.canvas.draw()
+
+    def on_drag(self, event):
+        if event.inaxes:
+            x = int(event.xdata)
+            y = int(event.ydata)
+
+            circle = self.active_circle
+
+            if circle:
+                circle.center = x, y
+                self.canvas.draw()
+
+    def on_release(self, event):
+        self.active_circle = None
 
     def thresholding(self):
         if self.image is not None:
@@ -162,16 +232,118 @@ class MedicalImageGUI:
             self.segmented_image = segmented_image
             self.show_segmented_image()
 
+    def segmentation_kmeans(self):
+        if self.image is not None:
+            # Obtener la rebanada actual según la dimensión seleccionada
+            layer = int(self.layer_scale.get())
+            data = self.image.get_fdata()
+            if self.selected_dimension == 'X':
+                image_slice = data[layer, :, :]
+            elif self.selected_dimension == 'Y':
+                image_slice = data[:, layer, :]
+            else:  # 'Z'
+                image_slice = data[:, :, layer]
+
+            # Normalizar la imagen para que los valores estén entre 0 y 1
+            normalized_image = image_slice / np.max(image_slice)
+
+            # Convertir la imagen a un vector unidimensional
+            flattened_image = normalized_image.flatten()
+
+            # Aplicar K-medias con k=2
+            kmeans = KMeans(n_clusters=2, random_state=0).fit(flattened_image.reshape(-1, 1))
+
+            # Obtener las etiquetas de los clústeres
+            labels = kmeans.labels_
+
+            # Segmentar la imagen según las etiquetas obtenidas
+            segmented_image = labels.reshape(normalized_image.shape) * 255
+
+            self.segmented_image = segmented_image.astype(np.uint8)
+            self.show_segmented_image()
+
+    def region_growing(self):
+        if self.image is not None:
+            # Obtener la rebanada actual según la dimensión seleccionada
+            layer = int(self.layer_scale.get())
+            data = self.image.get_fdata()
+            if self.selected_dimension == 'X':
+                image_slice = data[layer, :, :]
+            elif self.selected_dimension == 'Y':
+                image_slice = data[:, layer, :]
+            else:  # 'Z'
+                image_slice = data[:, :, layer]
+
+            # Elegir un punto de inicio (semilla) para el crecimiento de regiones
+            seed = (image_slice.shape[0] // 2, image_slice.shape[1] // 2)
+
+            # Lista para almacenar las coordenadas de los píxeles pertenecientes a la región
+            region = [seed]
+            # Lista para almacenar los píxeles ya visitados
+            visited = []
+
+            # Umbral para la comparación de intensidades
+            threshold = 20
+
+            while region:
+                # Tomar el primer píxel de la región
+                x, y = region.pop(0)
+
+                # Verificar si el píxel ya ha sido visitado
+                if (x, y) in visited:
+                    continue
+
+                # Marcar el píxel como visitado
+                visited.append((x, y))
+
+                # Verificar la intensidad del píxel con sus vecinos
+                for i in range(-1, 2):
+                    for j in range(-1, 2):
+                        # Coordenadas del vecino
+                        neighbor_x = x + i
+                        neighbor_y = y + j
+
+                        # Verificar si el vecino está dentro de la imagen
+                        if 0 <= neighbor_x < image_slice.shape[0] and 0 <= neighbor_y < image_slice.shape[1]:
+                            # Verificar si el vecino no ha sido visitado y su intensidad es similar al punto de inicio
+                            if (neighbor_x, neighbor_y) not in visited and abs(image_slice[x, y] - image_slice[neighbor_x, neighbor_y]) < threshold:
+                                # Agregar el vecino a la región
+                                region.append((neighbor_x, neighbor_y))
+
+            # Crear una matriz de ceros con las mismas dimensiones que la imagen
+            segmented_image = np.zeros_like(image_slice)
+            # Asignar valor 255 a los píxeles de la región
+            for x, y in visited:
+                segmented_image[x, y] = 255
+
+            self.segmented_image = segmented_image
+            self.show_segmented_image()
+
     def show_segmented_image(self):
         if self.segmented_image is not None:
             plt.imshow(self.segmented_image, cmap='gray')
             plt.axis('off')
             plt.show()
 
-
 def main():
     root = tk.Tk()
     app = MedicalImageGUI(root)
+
+    # Configurar tamaño de la ventana y centrarla en la pantalla
+    window_width = 800
+    window_height = 600
+    screen_width = root.winfo_screenwidth()
+    screen_height = root.winfo_screenheight()
+
+    x = (screen_width / 2) - (window_width / 2)
+    y = (screen_height / 2) - (window_height / 2)
+
+    root.geometry("%dx%d+%d+%d" % (window_width, window_height, x, y))
+
+    # Hacer la ventana principal un poco más grande
+    root.update_idletasks()
+    root.minsize(root.winfo_reqwidth() + 50, root.winfo_reqheight() + 50)
+
     root.mainloop()
 
 if __name__ == "__main__":
