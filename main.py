@@ -1,3 +1,6 @@
+# Luisa Maria Cardenas Lopez
+# 1823494
+
 import tkinter as tk
 from tkinter import filedialog
 from tkinter import ttk
@@ -9,8 +12,60 @@ from skimage.filters import threshold_isodata
 from sklearn.cluster import KMeans
 import matplotlib.pyplot as plt
 
+import tkinter as tk
+from tkinter import ttk, filedialog
+import nibabel as nib
+import numpy as np
+from matplotlib import pyplot as plt
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from skimage.filters import threshold_isodata
+from matplotlib.figure import Figure
+
+
 class MedicalImageGUI:
+    """
+    A GUI application for visualizing and segmenting medical images.
+
+    Attributes:
+        master (tk.Tk): The root window of the application.
+        image (nibabel.Nifti1Image): The loaded medical image.
+        ax (matplotlib.axes.Axes): The axes object for displaying the image.
+        canvas (FigureCanvasTkAgg): The canvas for displaying the image.
+        selected_dimension (str): The currently selected dimension (X, Y, or Z).
+        layer_scale (tk.Scale): The scale widget for selecting the image layer.
+        segmented_image (np.ndarray): The segmented image.
+        annotation_active (bool): Flag indicating if annotation mode is active.
+        circles (dict): Dictionary to store the annotation circles.
+        active_circle (matplotlib.patches.Circle): The currently active annotation circle.
+        current_color (str): The current color for annotation circles.
+        brush_size (int): The size of the annotation brush.
+
+    Methods:
+        create_menu(): Creates the menu bar for the application.
+        create_widgets(): Creates the widgets for the application.
+        load_image(): Loads a medical image file.
+        populate_dimensions_combobox(): Populates the dimensions combobox with available dimensions.
+        update_selected_dimension(event): Updates the selected dimension when the combobox selection changes.
+        update_layer_scale(): Updates the layer scale based on the selected dimension.
+        display_image(event): Displays the selected image layer.
+        toggle_annotation(): Toggles the annotation mode on/off.
+        activate_annotation(): Activates the annotation mode.
+        deactivate_annotation(): Deactivates the annotation mode.
+        on_click(event): Handles the mouse click event during annotation mode.
+        on_drag(event): Handles the mouse drag event during annotation mode.
+        on_release(event): Handles the mouse release event during annotation mode.
+        thresholding(): Performs image segmentation using thresholding.
+        segmentation_isodata(): Performs image segmentation using ISODATA thresholding.
+        segmentation_kmeans(): Performs image segmentation using K-means clustering.
+    """
+
     def __init__(self, master):
+        """
+        Initializes the MedicalImageGUI class.
+
+        Args:
+            master (tk.Tk): The root window of the application.
+        """
         self.master = master
         self.master.title("Visualizador de Imágenes Médicas")
 
@@ -32,6 +87,9 @@ class MedicalImageGUI:
         self.create_widgets()
 
     def create_menu(self):
+        """
+        Creates the menu bar for the application.
+        """
         menubar = tk.Menu(self.master)
 
         file_menu = tk.Menu(menubar, tearoff=0)
@@ -50,6 +108,9 @@ class MedicalImageGUI:
         self.master.config(menu=menubar)
 
     def create_widgets(self):
+        """
+        Creates the widgets for the application.
+        """
         self.load_button = tk.Button(self.master, text="Cargar Archivo", command=self.load_image)
         self.load_button.pack(side=tk.TOP)
 
@@ -72,12 +133,18 @@ class MedicalImageGUI:
         self.annotation_button.pack(side=tk.TOP)
 
     def load_image(self):
+        """
+        Loads a medical image file.
+        """
         file_path = filedialog.askopenfilename(filetypes=[("NIfTI files", "*.nii")])
         if file_path:
             self.image = nib.load(file_path)
             self.populate_dimensions_combobox()
 
     def populate_dimensions_combobox(self):
+        """
+        Populates the dimensions combobox with available dimensions.
+        """
         dimensions = ['X', 'Y', 'Z']
         self.dimension_combobox.config(values=dimensions, state="readonly")
         self.dimension_combobox.current(0)
@@ -86,10 +153,19 @@ class MedicalImageGUI:
         self.update_layer_scale()
 
     def update_selected_dimension(self, event):
+        """
+        Updates the selected dimension when the combobox selection changes.
+
+        Args:
+            event (tk.Event): The event object.
+        """
         self.selected_dimension = self.dimension_combobox.get()
         self.update_layer_scale()
 
     def update_layer_scale(self):
+        """
+        Updates the layer scale based on the selected dimension.
+        """
         data = self.image.get_fdata()
         if self.selected_dimension == 'X':
             num_layers = data.shape[0]
@@ -101,6 +177,12 @@ class MedicalImageGUI:
         self.layer_scale.config(from_=0, to=num_layers - 1)
 
     def display_image(self, event=None):
+        """
+        Displays the selected image layer.
+
+        Args:
+            event (tk.Event, optional): The event object. Defaults to None.
+        """
         if self.canvas:
             self.canvas.get_tk_widget().pack_forget()
 
@@ -122,6 +204,9 @@ class MedicalImageGUI:
         self.canvas.get_tk_widget().pack()
 
     def toggle_annotation(self):
+        """
+        Toggles the annotation mode on/off.
+        """
         if not self.annotation_active:
             self.activate_annotation()
             self.annotation_button_text.set("Desactivar Anotación")
@@ -130,6 +215,9 @@ class MedicalImageGUI:
             self.annotation_button_text.set("Activar Anotación")
 
     def activate_annotation(self):
+        """
+        Activates the annotation mode.
+        """
         if self.canvas:
             # Connect annotation functions to canvas events
             self.canvas.mpl_connect("button_press_event", self.on_click)
@@ -138,6 +226,9 @@ class MedicalImageGUI:
         self.annotation_active = True
 
     def deactivate_annotation(self):
+        """
+        Deactivates the annotation mode.
+        """
         if self.canvas:
             # Disconnect annotation functions from canvas events
             self.canvas.mpl_disconnect("button_press_event")
@@ -146,6 +237,12 @@ class MedicalImageGUI:
         self.annotation_active = False
 
     def on_click(self, event):
+        """
+        Handles the mouse click event during annotation mode.
+
+        Args:
+            event (matplotlib.backend_bases.MouseEvent): The mouse event object.
+        """
         if event.inaxes:
             x = int(event.xdata)
             y = int(event.ydata)
@@ -163,6 +260,12 @@ class MedicalImageGUI:
             self.canvas.draw()
 
     def on_drag(self, event):
+        """
+        Handles the mouse drag event during annotation mode.
+
+        Args:
+            event (matplotlib.backend_bases.MouseEvent): The mouse event object.
+        """
         if event.inaxes:
             x = int(event.xdata)
             y = int(event.ydata)
@@ -174,9 +277,18 @@ class MedicalImageGUI:
                 self.canvas.draw()
 
     def on_release(self, event):
+        """
+        Handles the mouse release event during annotation mode.
+
+        Args:
+            event (matplotlib.backend_bases.MouseEvent): The mouse event object.
+        """
         self.active_circle = None
 
     def thresholding(self):
+        """
+        Performs image segmentation using thresholding.
+        """
         if self.image is not None:
             # Obtener la rebanada actual según la dimensión seleccionada
             layer = int(self.layer_scale.get())
@@ -207,11 +319,14 @@ class MedicalImageGUI:
                 tau = new_tau
             # Convertir la imagen binaria a uint8 (0 y 255)
             segmented_image = (segmented_image * 255).astype(np.uint8)
-            
+
             self.segmented_image = segmented_image
             self.show_segmented_image()
 
     def segmentation_isodata(self):
+        """
+        Performs image segmentation using ISODATA thresholding.
+        """
         if self.image is not None:
             # Obtener la rebanada actual según la dimensión seleccionada
             layer = int(self.layer_scale.get())
@@ -225,14 +340,17 @@ class MedicalImageGUI:
 
             # Calcular el umbral ISODATA
             tau = threshold_isodata(image_slice)
-            
+
             # Segmentar la imagen
             segmented_image = (image_slice > tau).astype(np.uint8) * 255
-            
+
             self.segmented_image = segmented_image
             self.show_segmented_image()
 
     def segmentation_kmeans(self):
+        """
+        Performs image segmentation using K-means clustering.
+        """
         if self.image is not None:
             # Obtener la rebanada actual según la dimensión seleccionada
             layer = int(self.layer_scale.get())
